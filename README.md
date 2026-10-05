@@ -22,7 +22,7 @@ Root
 
 These objects should preserve the structure and semantics of the mathematics they represent, including concepts such as exactness, assumptions, domains, codomains, dimensions, and algebraic relationships.
 
-SymPy is the current symbolic backend. NumPy, SciPy, or mpmath may support future computational needs, while the public mathematical model remains defined by `mathfirst`.
+SymPy is the current symbolic backend, and NumPy supports numerical sampling in the optional browser viewer. SciPy or mpmath may support future computational needs, while the public mathematical model remains defined by `mathfirst`.
 
 The guiding principles are:
 
@@ -66,17 +66,29 @@ Install with `uv add mathfirst` or `pip install mathfirst`. Requires Python
 Package tests live in [`tests/`](tests/). See the
 [development guide](docs/development.md) for setup, checks, and releases.
 
-## Future direction
+## Browser visualization
 
-Other packages can build on this common mathematical foundation for visualization, simulation, or analysis. One possible future visualization layout is:
+Install the optional viewer with `uv add "mathfirst[viz]"` or
+`pip install "mathfirst[viz]"`. In this checkout, use `uv sync --locked --extra viz`.
 
-```text
-mathfirst
-├── core mathematical objects
-├── symbolic / numeric operations
-└── viz/
-    └── visualization of mathematical objects
+```python
+from mathfirst import Polynomial, Variable
+from mathfirst.viz import FunctionGraph, Viewer
+
+x = Variable("x")
+p = Polynomial(x**3 - 2 * x + 1, x)
+viewer = Viewer(FunctionGraph(p))
+viewer.show()  # Opens a local browser viewer and blocks until stopped.
 ```
+
+The first slice displays one function graph with pan, zoom, and hover. `FunctionGraph`
+is declarative; `Viewer` owns sampling, rendering, the server, and internal view state.
+Use `viewer.show(block=False)` explicitly for notebooks or background use, then
+`viewer.close()` when finished. See [visualization usage and limits](docs/viz.md)
+and [the runnable example](examples/function_graph.py).
+
+CLI/watch mode, figures/exports, multiple realizations, and additional backends
+are future work.
 
 Visualization is therefore not the purpose of the math layer itself; it is one consumer of it.
 

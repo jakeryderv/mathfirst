@@ -51,6 +51,12 @@ jobs:
       - name: Check source distribution installation
         run: uv run --isolated --no-project --with dist/*.tar.gz python -I tests/smoke.py
 
+      - name: Check installed visualization extra and assets
+        run: |
+          for artifact in dist/*.whl dist/*.tar.gz; do
+            uv run --isolated --no-project --with "mathfirst[viz] @ file://$PWD/$artifact" python -I tests/smoke_viz.py
+          done
+
       - name: Upload distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
