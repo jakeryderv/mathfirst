@@ -1,21 +1,38 @@
 [project]
 name = "mathfirst"
-version = "0.1.0"
+version = "0.2.0"
 description = "A math-native layer for representing and working with mathematics in Python."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.15"
 authors = [{ name = "Jake Van Slyke", email = "jakervanslyke@gmail.com" }]
-dependencies = []
+dependencies = ["sympy>=1.14.0"]
 
 [project.urls]
 Repository = "https://github.com/jakeryderv/mathfirst"
 Issues = "https://github.com/jakeryderv/mathfirst/issues"
 
-[project.scripts]
-mathfirst = "mathfirst:main"
+[dependency-groups]
+dev = ["pytest>=9.1.1", "ruff>=0.16.9", "ty>=0.0.84"]
 
 [build-system]
 requires = ["uv_build>=0.12.18,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.pytest]
+addopts = ["-ra", "--import-mode=importlib"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ty.environment]
+python-platform = "all"
