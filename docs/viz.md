@@ -34,6 +34,31 @@ Run the complete example from the repository root:
 uv run --locked --extra viz python examples/function_graph.py
 ```
 
+## Practical examples
+
+Each example keeps the math, realization, and viewer explicit:
+
+| Example | What to observe |
+| --- | --- |
+| [Cubic graph](../examples/function_graph.py) | Pan, scroll zoom, hover coordinates, and reset. |
+| [Bounded domain](../examples/bounded_domain.py) | The open interval `(-2, 2)` supplies the initial range; panning outside it leaves blank regions. Open endpoints have no special markers yet. |
+| [Invalid values](../examples/invalid_values.py) | `sqrt(x)` is blank for negative inputs. Pan entirely into the negative range, then reset to return to the curve. |
+| [Notebook viewer](../examples/notebook_viewer.ipynb) | Start explicitly in background mode, inspect the URL, and stop the server from another cell. |
+
+Run the additional scripts from the repository root:
+
+```sh
+uv run --locked --extra viz python examples/bounded_domain.py
+uv run --locked --extra viz python examples/invalid_values.py
+```
+
+Open the notebook in your notebook editor and select a local Python kernel with
+the visualization extra installed. In this checkout, that is the `.venv`
+environment created by `uv sync --locked --extra viz`; the kernel also needs
+`ipykernel`, which your editor can install if requested. Run cells in order, keep
+the kernel alive while viewing, and run the final shutdown cell when finished.
+Before rerunning the cells that construct a new viewer, close the existing one.
+
 ## Notebooks and background use
 
 Blocking behavior is identical everywhere. Choose background mode explicitly:
