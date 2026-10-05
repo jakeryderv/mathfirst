@@ -22,6 +22,61 @@ installed package, and use pytest's `importlib` import mode.
 CI runs on pushes and pull requests, testing Python 3.12, 3.13, and 3.14.
 The publishing workflow runs the same checks before building and uploading.
 
+## Coverage and generated tests
+
+`uv run pytest` reports branch coverage for `mathfirst`, including missing lines
+and branch destinations. Pre-push, CI, and release checks use the same pytest
+configuration. Coverage currently reports a baseline without a minimum threshold;
+use the gaps to guide useful tests before choosing a required percentage.
+
+Generate a browsable report or run without coverage while debugging:
+
+```sh
+uv run pytest --cov-report=html
+uv run pytest --no-cov
+```
+
+The HTML report is written to `htmlcov/index.html`. Coverage data and reports
+are ignored by Git.
+
+Hypothesis tests in `tests/test_properties.py` check exact scalar arithmetic
+against Python's `Fraction`, polynomial evaluation against Horner's method,
+and real roots against known factors and multiplicities. Inputs are bounded
+integers and rationals; symbolic tests use 50 generated examples each and disable
+per-example time deadlines to avoid failures caused by machine speed.
+
+Hypothesis runs through pytest and stores useful examples locally in the ignored
+`.hypothesis/` directory. If it finds a failure, preserve a focused regression test
+alongside the generated test. To inspect example statistics:
+
+```sh
+uv run pytest tests/test_properties.py --hypothesis-show-statistics
+```
+
+## Git hooks
+
+After cloning and running `uv sync --locked`, install both local hooks:
+
+```sh
+uv run --locked pre-commit install
+```
+
+The configuration installs both `pre-commit` and `pre-push`. Commits check
+formatting and linting on staged Python files and run project-wide type checking.
+Pushes run the full test suite once, including pushes without Python changes.
+Hook commands use `uv run --locked` to use the project's locked tool versions.
+Formatting checks report changes to make; run `uv run ruff format .` to apply them.
+
+Run either stage manually against all tracked files:
+
+```sh
+uv run --locked pre-commit run --all-files --hook-stage pre-commit
+uv run --locked pre-commit run --all-files --hook-stage pre-push
+```
+
+Hook installation is local to each clone. CI and release validation continue to
+run independently of local hooks.
+
 ## Releases
 
 Update `[project.version]` in `pyproject.toml`, run `uv lock`, and run the checks

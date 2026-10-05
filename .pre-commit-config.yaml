@@ -1,0 +1,35 @@
+minimum_pre_commit_version: "4.6.2"
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: Ruff formatting check
+        entry: uv run --locked ruff format --check
+        language: system
+        types: [python]
+
+      - id: ruff-check
+        name: Ruff lint
+        entry: uv run --locked ruff check
+        language: system
+        types: [python]
+
+      - id: ty
+        name: Type check
+        entry: uv run --locked ty check
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+      - id: pytest
+        name: Tests
+        entry: uv run --locked pytest
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+        require_serial: true
