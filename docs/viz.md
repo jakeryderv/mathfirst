@@ -95,6 +95,10 @@ computer as Python; remote notebook hosting is outside this slice.
   Invalid, nonfinite, and complex values become gaps. This is an approximate
   graph: narrow features and poles between samples may be missed or connected.
   There is no adaptive sampling or symbolic discontinuity detection yet.
+- Bounds, samples, and validity masks stay NumPy-backed inside the viewer.
+  Bounds and sample arrays are owned and read-only; JSON conversion happens when
+  sending WebSocket messages, with invalid samples represented as `null`.
+  See [numerical contracts](numerical.md) for dtype, validation, and ownership policies.
 - Functions must be supported by the NumPy evaluation backend. Initial
   evaluation failures raise a useful error before server startup; later evaluation
   errors leave the last successful graph and viewport intact.

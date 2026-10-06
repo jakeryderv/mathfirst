@@ -15,6 +15,9 @@ every mathematical domain or numerical backend:
 | Exact and symbolic mathematics | SymPy expressions, preserving exact integers, fractions, and constants |
 | `Scalar.to_numpy()` | `np.float64` for known real values; `np.complex128` otherwise; NaN and signed infinity use the real default |
 | `as_numeric_array()` | `NDArray[np.float64]`, unless the caller declares another supported dtype |
+| `Function.evaluate_numpy()` / `Polynomial.evaluate_numpy()` | `np.float64` or `NDArray[np.float64]`; explicit floating/complex dtype applies to inputs and results |
+| `Point.to_numpy()` | `NDArray[np.float64]` of shape `(dimension,)`; explicit complex or integer output is available |
+| Viewer bounds, sampling grids, and ordinates | `NDArray[np.float64]`; intermediate function values use `complex128` for validity checks |
 | Numerical validity masks | `NDArray[np.bool_]`, distinct from numerical magnitudes |
 
 `DEFAULT_REAL_DTYPE` and `DEFAULT_COMPLEX_DTYPE` in `mathfirst.numerical` declare
@@ -25,8 +28,7 @@ dimensions, multiplicities, and implementation counters retain their existing
 semantic or exact representations.
 
 NumPy and SymPy are core dependencies. The optional `viz` extra supplies the web
-runtime. This slice does not add numerical function evaluation or change the viewer's
-sampling implementation. `Function.__call__()` continues to perform symbolic
+runtime. `Function.__call__()` continues to perform symbolic
 substitution and return mathematical objects, including for NumPy scalar arguments.
 
 ## Scalar input and intent
@@ -91,6 +93,78 @@ Python booleans. Unsupported types/dtypes raise `TypeError`; invalid values rais
 Returned NumPy scalars are immutable, independent numerical results. There is no
 mutable array view or numerical cache attached to the mathematical source.
 
+## Numerical function evaluation
+
+```python
+import numpy as np
+
+from mathfirst import Polynomial, Scalar, Variable
+
+x = Variable("x")
+p = Polynomial(x**2 + Scalar.exact("0.1"), x)
+exact = p(2)  # Scalar containing exact 41/10
+value = p.evaluate_numpy(2)  # np.float64
+values = p.evaluate_numpy([0, 1, 2])  # Writable float64 array, shape (3,)
+smaller = p.evaluate_numpy([0, 1], dtype=np.float32)
+```
+
+`Function.evaluate_numpy(*values, dtype=..., allow_nonfinite=...)` also applies to
+`Polynomial`. It checks argument count and canonicalizes concrete inputs before
+numerical evaluation. Mathematical `Scalar` inputs must be converted explicitly
+with `to_numpy()` first; unresolved expressions and object arrays are rejected.
+Domain and codomain sets remain descriptive metadata, just as for exact substitution.
+
+Arguments follow [NumPy broadcasting](https://numpy.org/doc/stable/user/basics.broadcasting.html).
+For example, two arguments of shapes `(3, 1)` and `(1, 4)` produce shape `(3, 4)`.
+The output always has the common broadcast shape, including when an argument is
+unused, an expression is constant, or an input is empty. Incompatible argument
+shapes and unexpected backend result shapes raise `ValueError`. All scalar or
+zero-dimensional inputs produce a NumPy scalar, including a constant function
+with no arguments. Otherwise the result is an independent, writable array;
+constant broadcasting does not expose NumPy's read-only broadcast view.
+
+The default input/output dtype is MathFirst's `float64`. Callers may select
+`float16/32/64` or `complex64/128`. Integer output is excluded from function
+evaluation, which can involve approximate arithmetic. Complex input requires an
+explicit complex dtype. A complex dtype also changes backend arithmetic: for
+example, `sqrt(-1)` produces `1j` with `complex128`, while real evaluation produces
+NaN. An expression already simplified using real-variable assumptions is not
+guaranteed to describe a complex continuation.
+
+The backend is [SymPy's NumPy lambdify](https://docs.sympy.org/latest/modules/utilities/lambdify.html);
+unsupported expressions raise `ValueError`. Attached custom SymPy implementations
+are not used. Numerical constants use the scalar conversion policy, including
+large exact integers that fit a floating representation. The operation creates
+no numerical cache or mutable numerical state on the mathematical object.
+
+Nonfinite inputs and results raise `ValueError` unless `allow_nonfinite=True`.
+With that opt-in, NaN/infinity from floating arithmetic, such as division by zero
+or arithmetic overflow, are retained. Conversion of a finite value that overflows
+its representation still raises `OverflowError`. Nonzero imaginary components
+cannot be discarded by real output. Floating arithmetic, rounding, and underflow
+follow the selected backend dtype; these results carry no exactness guarantee.
+
+## Numerical point coordinates
+
+```python
+from fractions import Fraction
+
+from mathfirst import Point
+
+point = Point(Fraction(1, 3), 2)
+coordinates = point.to_numpy()  # Writable float64 array, shape (2,)
+coordinates[0] = 0  # The mathematical point still contains exact 1/3.
+```
+
+`Point` retains ordered mathematical coordinates. `to_numpy()` returns a new
+one-dimensional array of shape `(point.dimension,)` and defaults to MathFirst's
+`float64`. Complex coordinates require an explicit complex dtype. Each coordinate
+follows `Scalar.to_numpy()` validation and precision policies, including proven
+integer/range checks for explicit integer output and nonfinite opt-in.
+Unresolved symbolic coordinates must be substituted before conversion; unevaluable
+coordinates are rejected. Repeated calls produce independent arrays and do not
+attach mutable numerical state to the point.
+
 ## Array canonicalization and ownership
 
 ```python
@@ -130,3 +204,30 @@ positivity, or other domain invariants. Validate these at the relevant domain bo
 `numpy.typing` aliases and overloads support static checking with ty; explicit runtime
 validation enforces the conversion contracts. No jaxtyping/beartype dependency is
 needed for this slice.
+
+## Viewer boundaries and ownership
+
+The viewer owns sampling resolution and runtime state. Bounds are copied into
+read-only `float64` arrays of shape `(2,)`, then checked for finite, increasing
+limits with a finite width. An unbounded declared interval may have infinite
+domain endpoints; the actual viewport must remain finite. Caller mutations to
+input bounds cannot change the viewer's current or initial range.
+
+Each sampling call produces fresh, read-only `float64` x/y arrays and a separate
+boolean validity mask, all of shape `(513,)`. Invalid y entries contain NaN;
+the mask determines which entries are usable. These arrays are not cached or
+shared between calls. Read-only flags prevent accidental writes through the
+normal interface; they are not a deep-immutability guarantee. Compiled viewer
+evaluators are cached, with real input grids and complex output conversion used
+only to validate real, finite plotted values.
+
+The WebSocket boundary converts NumPy arrays/scalars into Python/JSON lists and
+numbers. Invalid entries become JSON `null`, so NaN/infinity never leak into
+messages. Incoming JSON viewport values are validated and canonicalized before
+they enter viewer state. Failed evaluation preserves the previous successful state.
+
+[`numpy.typing`](https://numpy.org/doc/stable/reference/typing.html) describes
+scalar/array dtypes, and ty checks the API overloads. Argument counts, broadcast
+shapes, bounds, dtypes, finiteness, representability, and ownership are enforced
+explicitly at the relevant runtime boundary. Type annotations alone establish
+neither shape guarantees nor mathematical domain membership.

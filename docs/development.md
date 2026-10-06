@@ -48,8 +48,11 @@ against Python's `Fraction`, polynomial evaluation against Horner's method,
 real roots against known factors and multiplicities, and scalar NumPy conversion
 against Python's `Fraction` conversion. Numerical canonicalization tests also cover
 finite float64 inputs, and generated viewer tests compare sampled quadratics with
-Python arithmetic. Symbolic inputs are bounded integers and rationals; the more
-expensive symbolic tests use 50 examples and disable per-example time deadlines
+Python arithmetic. Numerical function tests check polynomial values, broadcasting,
+empty and constant results, dtype/validity contracts, and independent array
+ownership. Server tests verify NumPy data crosses the JSON boundary as numbers
+and `null`, with viewport recovery after errors. Symbolic inputs are bounded integers
+and rationals; the more expensive symbolic tests use 50 examples and disable per-example time deadlines
 to avoid failures caused by machine speed.
 
 Hypothesis runs through pytest and stores useful examples locally in the ignored

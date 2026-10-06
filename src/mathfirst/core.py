@@ -7,7 +7,7 @@ from typing import cast, overload
 
 import numpy as np
 import sympy as sp
-from numpy.typing import DTypeLike
+from numpy.typing import DTypeLike, NDArray
 from sympy.parsing.sympy_parser import (
     parse_expr,
     rationalize,
@@ -17,8 +17,10 @@ from sympy.parsing.sympy_parser import (
 from .numerical import (
     DEFAULT_COMPLEX_DTYPE,
     DEFAULT_REAL_DTYPE,
+    NumericArray,
     NumericInput,
     NumericScalar,
+    RealArray,
     _numeric_dtype,
     as_numeric_array,
 )
@@ -360,6 +362,8 @@ class Set:
 
 
 class Point:
+    """Ordered mathematical coordinates; numerical conversion is explicit."""
+
     __slots__ = ("_coordinates",)
 
     def __init__(self, *coordinates: object) -> None:
@@ -381,6 +385,49 @@ class Point:
     def to_sympy(self) -> sp.Tuple:
         """Return the ordered coordinates as a SymPy tuple."""
         return sp.Tuple(*(coordinate.to_sympy() for coordinate in self._coordinates))
+
+    @overload
+    def to_numpy(
+        self, *, dtype: None = None, allow_nonfinite: bool = False
+    ) -> RealArray: ...
+
+    @overload
+    def to_numpy[NumericT: NumericScalar](
+        self,
+        *,
+        dtype: type[NumericT] | np.dtype[NumericT],
+        allow_nonfinite: bool = False,
+    ) -> NDArray[NumericT]: ...
+
+    @overload
+    def to_numpy(
+        self, *, dtype: DTypeLike, allow_nonfinite: bool = False
+    ) -> NumericArray: ...
+
+    def to_numpy(
+        self, *, dtype: DTypeLike | None = None, allow_nonfinite: bool = False
+    ) -> NumericArray:
+        """Return independent, writable coordinates of shape (dimension,).
+
+        The point domain defaults to float64. Complex coordinates require an
+        explicit complex dtype. Scalar conversion policies apply to each
+        coordinate, including exact integer conversion and nonfinite opt-in.
+        Unresolved symbolic coordinates must be substituted before conversion.
+        Mutating the returned array never changes the mathematical point.
+        """
+        if not isinstance(allow_nonfinite, bool):
+            raise TypeError("allow_nonfinite must be a Python boolean")
+        target = _numeric_dtype(DEFAULT_REAL_DTYPE if dtype is None else dtype)
+        result = np.empty(self.dimension, dtype=target)
+        for index, coordinate in enumerate(self._coordinates):
+            if coordinate.to_sympy().free_symbols:
+                raise ValueError(
+                    "Point conversion requires coordinates without free variables"
+                )
+            result[index] = Scalar(coordinate).to_numpy(
+                dtype=target, allow_nonfinite=allow_nonfinite
+            )
+        return result
 
     def __repr__(self) -> str:
         return f"Point({', '.join(map(str, self._coordinates))})"

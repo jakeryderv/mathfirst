@@ -2,7 +2,6 @@
 
 import atexit
 import importlib
-import math
 import socket
 import threading
 import time
@@ -10,15 +9,33 @@ import warnings
 import webbrowser
 from collections.abc import Callable
 from importlib import resources
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Literal, NamedTuple, Self
 
+import numpy as np
 import sympy as sp
+from numpy.typing import ArrayLike
 
+from ..core import Scalar
+from ..numerical import (
+    DEFAULT_COMPLEX_DTYPE,
+    DEFAULT_REAL_DTYPE,
+    MaskArray,
+    RealArray,
+    as_numeric_array,
+)
 from .realization import FunctionGraph
 
 if TYPE_CHECKING:
     import uvicorn
     from fastapi import FastAPI
+
+
+class _Samples(NamedTuple):
+    """Fresh read-only arrays; invalid y entries are NaN and valid is authoritative."""
+
+    x: RealArray
+    y: RealArray
+    valid: MaskArray
 
 
 class Viewer:
@@ -31,9 +48,7 @@ class Viewer:
 
     _sample_count = 513
 
-    def __init__(
-        self, graph: FunctionGraph, *, xlim: tuple[float, float] | None = None
-    ) -> None:
+    def __init__(self, graph: FunctionGraph, *, xlim: ArrayLike | None = None) -> None:
         if not isinstance(graph, FunctionGraph):
             raise TypeError("Viewer requires a FunctionGraph")
         self._graph = graph
@@ -46,14 +61,20 @@ class Viewer:
         ):
             raise ValueError("The viewer currently supports real or interval domains")
         self._interval = domain if isinstance(domain, sp.Interval) else None
-        self._domain_bounds: tuple[float, float] | None = None
+        self._domain_bounds: RealArray | None = None
         if self._interval is not None:
             try:
-                self._domain_bounds = (
-                    float(self._interval.start),
-                    float(self._interval.end),
+                self._domain_bounds = as_numeric_array(
+                    [
+                        Scalar(endpoint).to_numpy(
+                            dtype=DEFAULT_REAL_DTYPE, allow_nonfinite=True
+                        )
+                        for endpoint in (self._interval.start, self._interval.end)
+                    ],
+                    allow_nonfinite=True,
                 )
-            except (TypeError, ValueError) as exc:
+                self._domain_bounds.setflags(write=False)
+            except (TypeError, ValueError, OverflowError) as exc:
                 raise ValueError(
                     "Interval endpoints must be numerically evaluable"
                 ) from exc
@@ -61,8 +82,8 @@ class Viewer:
             self._check_range(xlim) if xlim is not None else self._default_range()
         )
         self._xlim = self._initial_xlim
-        self._ylim: tuple[float, float] | None = None
-        self._evaluate: Callable[..., object] | None = None
+        self._ylim: RealArray | None = None
+        self._evaluate: Callable[..., ArrayLike] | None = None
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
         self._socket: socket.socket | None = None
@@ -83,30 +104,32 @@ class Viewer:
         )
 
     @staticmethod
-    def _check_range(bounds: tuple[float, float]) -> tuple[float, float]:
-        if len(bounds) != 2 or any(isinstance(value, bool) for value in bounds):
-            raise ValueError("Bounds must contain two real numbers")
-        low, high = map(float, bounds)
-        if (
-            not math.isfinite(low)
-            or not math.isfinite(high)
-            or low >= high
-            or not math.isfinite(high - low)
-        ):
+    def _check_range(bounds: ArrayLike) -> RealArray:
+        try:
+            result = as_numeric_array(bounds)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Bounds must contain two finite real numbers") from exc
+        if result.shape != (2,):
+            raise ValueError("Bounds must have shape (2,)")
+        low, high = result
+        with np.errstate(over="ignore"):
+            finite_width = np.isfinite(high - low)
+        if low >= high or not finite_width:
             raise ValueError("Bounds must be finite and increasing")
-        return low, high
+        result.setflags(write=False)
+        return result
 
-    def _default_range(self) -> tuple[float, float]:
+    def _default_range(self) -> RealArray:
         if self._domain_bounds is not None:
             low, high = self._domain_bounds
-            if math.isfinite(low) and math.isfinite(high):
+            if np.isfinite(self._domain_bounds).all():
                 return self._check_range((low, high))
-        return -5.0, 5.0
+        return self._check_range((-5.0, 5.0))
 
     @staticmethod
     def _require_viz() -> None:
         try:
-            for name in ("numpy", "fastapi", "pydantic", "uvicorn", "websockets"):
+            for name in ("fastapi", "pydantic", "uvicorn", "websockets"):
                 importlib.import_module(name)
         except ImportError as exc:
             raise ImportError(
@@ -114,43 +137,49 @@ class Viewer:
                 "Install 'mathfirst[viz]' or run 'uv sync --extra viz'."
             ) from exc
 
-    def _sample(
-        self, bounds: tuple[float, float]
-    ) -> tuple[list[float], list[float | None]]:
-        self._require_viz()
-        import numpy as np
-
+    def _sample(self, bounds: ArrayLike) -> _Samples:
         low, high = self._check_range(bounds)
-        x = np.linspace(low, high, self._sample_count)
-        selected = np.ones(x.shape, dtype=bool)
+        x = np.linspace(low, high, self._sample_count, dtype=DEFAULT_REAL_DTYPE)
+        selected = np.ones(x.shape, dtype=np.bool_)
         if self._interval is not None:
             assert self._domain_bounds is not None
             start, end = self._domain_bounds
             selected &= x > start if self._interval.left_open else x >= start
             selected &= x < end if self._interval.right_open else x <= end
-        y: list[float | None] = [None] * len(x)
-        if not selected.any():
-            return x.tolist(), y
-
+        y = np.full(x.shape, np.nan, dtype=DEFAULT_REAL_DTYPE)
+        valid = np.zeros(x.shape, dtype=np.bool_)
         try:
-            if self._evaluate is None:
-                self._evaluate = sp.lambdify(
-                    self.graph.function.variables[0].to_sympy(),
-                    self.graph.function.expression.to_sympy(),
-                    modules="numpy",
-                    dummify=True,
+            if selected.any():
+                if self._evaluate is None:
+                    expression = self.graph.function.expression
+                    if expression.to_sympy().is_number:
+                        constant = Scalar(expression).to_numpy(
+                            dtype=DEFAULT_COMPLEX_DTYPE, allow_nonfinite=True
+                        )
+                        self._evaluate = lambda values: constant
+                    else:
+                        self._evaluate = sp.lambdify(
+                            self.graph.function.variables[0].to_sympy(),
+                            expression.to_sympy(),
+                            modules="numpy",
+                            dummify=True,
+                            use_imps=False,
+                        )
+                selected_x = x[selected]
+                with np.errstate(all="ignore"):
+                    values = as_numeric_array(
+                        self._evaluate(selected_x),
+                        dtype=DEFAULT_COMPLEX_DTYPE,
+                        allow_nonfinite=True,
+                    )
+                    values = np.broadcast_to(values, selected_x.shape)
+                usable = (
+                    np.isfinite(values.real)
+                    & np.isfinite(values.imag)
+                    & (values.imag == 0)
                 )
-            with np.errstate(all="ignore"):
-                values = np.asarray(self._evaluate(x[selected]), dtype=np.complex128)
-                values = np.broadcast_to(values, x[selected].shape)
-            valid = (
-                np.isfinite(values.real) & np.isfinite(values.imag) & (values.imag == 0)
-            )
-            for index, value, usable in zip(
-                np.flatnonzero(selected), values.real, valid, strict=True
-            ):
-                if usable:
-                    y[int(index)] = float(value)
+                valid[selected] = usable
+                y[selected] = np.where(usable, values.real, np.nan)
         except (
             TypeError,
             ValueError,
@@ -162,7 +191,9 @@ class Viewer:
             raise ValueError(
                 "This function cannot be sampled with the NumPy backend"
             ) from exc
-        return x.tolist(), y
+        for array in (x, y, valid):
+            array.setflags(write=False)
+        return _Samples(x, y, valid)
 
     @staticmethod
     def _asset(name: str) -> bytes:
@@ -234,9 +265,9 @@ class Viewer:
                     "type": "ready",
                     "label": str(viewer.graph.function.expression),
                     "variable": viewer.graph.function.variables[0].name,
-                    "xlim": viewer._xlim,
-                    "ylim": viewer._ylim,
-                    "initial_xlim": viewer._initial_xlim,
+                    "xlim": viewer._xlim.tolist(),
+                    "ylim": None if viewer._ylim is None else viewer._ylim.tolist(),
+                    "initial_xlim": viewer._initial_xlim.tolist(),
                 }
             )
             try:
@@ -258,7 +289,13 @@ class Viewer:
                         )
                         continue
                     try:
-                        x, y = await run_in_threadpool(viewer._sample, request.xlim)
+                        xlim = viewer._check_range(request.xlim)
+                        ylim = (
+                            None
+                            if request.ylim is None
+                            else viewer._check_range(request.ylim)
+                        )
+                        samples = await run_in_threadpool(viewer._sample, xlim)
                     except ValueError as exc:
                         await websocket.send_json(
                             {
@@ -268,14 +305,19 @@ class Viewer:
                             }
                         )
                         continue
-                    viewer._xlim = request.xlim
-                    viewer._ylim = request.ylim
+                    viewer._xlim = xlim
+                    viewer._ylim = ylim
                     await websocket.send_json(
                         {
                             "type": "samples",
                             "request_id": request.request_id,
-                            "x": x,
-                            "y": y,
+                            "x": samples.x.tolist(),
+                            "y": [
+                                float(value) if usable else None
+                                for value, usable in zip(
+                                    samples.y, samples.valid, strict=True
+                                )
+                            ],
                         }
                     )
             except WebSocketDisconnect:

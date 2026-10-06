@@ -1,8 +1,20 @@
 from __future__ import annotations
 
-import sympy as sp
+from typing import cast, overload
 
-from .core import Expression, Set, Variable, _to_sympy, _wrap_sympy
+import numpy as np
+import sympy as sp
+from numpy.typing import ArrayLike, DTypeLike, NDArray
+
+from .core import Expression, Scalar, Set, Variable, _to_sympy, _wrap_sympy
+from .numerical import (
+    DEFAULT_REAL_DTYPE,
+    NumericArray,
+    NumericScalar,
+    RealArray,
+    _numeric_dtype,
+    as_numeric_array,
+)
 
 
 class Function:
@@ -89,6 +101,109 @@ class Function:
         )
 
         return _wrap_sympy(result)
+
+    @overload
+    def evaluate_numpy(
+        self,
+        *values: ArrayLike,
+        dtype: None = None,
+        allow_nonfinite: bool = False,
+    ) -> np.float64 | RealArray: ...
+
+    @overload
+    def evaluate_numpy[NumericT: NumericScalar](
+        self,
+        *values: ArrayLike,
+        dtype: type[NumericT] | np.dtype[NumericT],
+        allow_nonfinite: bool = False,
+    ) -> NumericT | NDArray[NumericT]: ...
+
+    @overload
+    def evaluate_numpy(
+        self,
+        *values: ArrayLike,
+        dtype: DTypeLike,
+        allow_nonfinite: bool = False,
+    ) -> NumericScalar | NumericArray: ...
+
+    def evaluate_numpy(
+        self,
+        *values: ArrayLike,
+        dtype: DTypeLike | None = None,
+        allow_nonfinite: bool = False,
+    ) -> NumericScalar | NumericArray:
+        """Evaluate numerically with NumPy broadcasting and owned results.
+
+        Inputs and output use MathFirst's float64 default, or an explicitly
+        requested floating/complex dtype. Complex input evaluation requires a
+        complex dtype. Zero-dimensional inputs return a NumPy scalar; otherwise
+        the result is an independent, writable array of the broadcast shape,
+        including for constant expressions and empty inputs.
+
+        Nonfinite inputs/results require allow_nonfinite=True. Real output
+        cannot discard imaginary components. Unsupported backend expressions
+        raise ValueError. Sets and symbolic assumptions remain descriptive:
+        this operation does not enforce membership or complex continuation of
+        formulas simplified using real-variable assumptions.
+        """
+        if len(values) != len(self._variables):
+            raise ValueError(
+                f"Expected {len(self._variables)} arguments, got {len(values)}"
+            )
+        if not isinstance(allow_nonfinite, bool):
+            raise TypeError("allow_nonfinite must be a Python boolean")
+        target = _numeric_dtype(DEFAULT_REAL_DTYPE if dtype is None else dtype)
+        if target.kind not in "fc":
+            raise TypeError("Numerical evaluation requires a floating or complex dtype")
+        arguments = tuple(
+            as_numeric_array(value, dtype=target, allow_nonfinite=allow_nonfinite)
+            for value in values
+        )
+        try:
+            shape = np.broadcast_shapes(*(argument.shape for argument in arguments))
+        except ValueError as exc:
+            raise ValueError(
+                "Numerical arguments must have broadcast-compatible shapes"
+            ) from exc
+        if self._expression.to_sympy().is_number:
+            # Preserve the scalar conversion policy for exact constants whose
+            # Python integers would otherwise infer an object array.
+            raw = Scalar(self._expression).to_numpy(
+                dtype=target, allow_nonfinite=allow_nonfinite
+            )
+        else:
+            try:
+                evaluate = sp.lambdify(
+                    tuple(variable.to_sympy() for variable in self._variables),
+                    self._expression.to_sympy(),
+                    modules="numpy",
+                    dummify=True,
+                    use_imps=False,
+                )
+                with np.errstate(all="ignore"):
+                    raw = evaluate(*arguments)
+            except (
+                TypeError,
+                ValueError,
+                NameError,
+                ZeroDivisionError,
+                OverflowError,
+                NotImplementedError,
+            ) as exc:
+                raise ValueError(
+                    "This function cannot be evaluated with the NumPy backend"
+                ) from exc
+        result = as_numeric_array(raw, dtype=target, allow_nonfinite=allow_nonfinite)
+        if result.shape != shape:
+            try:
+                result = np.broadcast_to(result, shape).copy()
+            except ValueError as exc:
+                raise ValueError(
+                    "Numerical result does not match the argument shape"
+                ) from exc
+        if not shape:
+            return cast(NumericScalar, result[()])
+        return result
 
     def to_sympy(self) -> sp.Basic:
         """Return a SymPy Lambda; declared sets remain metadata on this object.

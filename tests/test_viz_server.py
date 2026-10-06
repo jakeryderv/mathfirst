@@ -5,13 +5,14 @@ import threading
 import time
 from urllib.request import urlopen
 
+import numpy as np
 import pytest
 import uvicorn
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from websockets.sync.client import connect
 
-from mathfirst import Polynomial, Variable
+from mathfirst import Function, Polynomial, Variable
 from mathfirst.viz import FunctionGraph, Viewer
 
 
@@ -76,6 +77,25 @@ def test_viewport_resamples_without_changing_realization(viewer):
             assert ready["ylim"] == [-10, 10]
             assert ready["initial_xlim"] == [-5, 5]
     assert viewer.graph is graph
+    assert viewer._xlim.dtype == viewer._ylim.dtype == np.dtype(np.float64)
+    assert not viewer._xlim.flags.writeable and not viewer._ylim.flags.writeable
+
+
+def test_numpy_nonfinite_samples_are_serialized_as_json_null():
+    x = Variable("x")
+    viewer = Viewer(FunctionGraph(Function(1 / x, (x,))))
+    with (
+        TestClient(viewer._create_app()) as client,
+        client.websocket_connect("/ws") as websocket,
+    ):
+        websocket.receive_json()
+        websocket.send_json(viewport())
+        text = websocket.receive_text()
+        assert "NaN" not in text and "Infinity" not in text
+        message = json.loads(text)
+        assert message["y"][256] is None
+        assert message["y"][0] == -1 and message["y"][-1] == 1
+        assert len(message["x"]) == len(message["y"]) == 513
 
 
 @pytest.mark.parametrize(
@@ -105,7 +125,7 @@ def test_invalid_messages_leave_connection_usable(viewer, message):
         websocket.receive_json()
         websocket.send_text(message)
         assert websocket.receive_json()["type"] == "error"
-        assert viewer._xlim == (-5, 5)
+        np.testing.assert_array_equal(viewer._xlim, [-5, 5])
         websocket.send_json(viewport())
         assert websocket.receive_json()["type"] == "samples"
 
@@ -130,7 +150,7 @@ def test_evaluation_errors_preserve_previous_state(viewer, monkeypatch):
             "request_id": 7,
             "message": "Cannot evaluate this range",
         }
-        assert viewer._xlim == (-5, 5)
+        np.testing.assert_array_equal(viewer._xlim, [-5, 5])
         websocket.send_json(viewport(8))
         assert websocket.receive_json()["request_id"] == 8
 
