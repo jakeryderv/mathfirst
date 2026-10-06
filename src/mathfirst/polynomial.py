@@ -12,6 +12,7 @@ from .core import (
     _wrap_sympy,
 )
 from .function import Function
+from .numerical import NumericInput
 
 
 class Polynomial(Function):
@@ -23,7 +24,7 @@ class Polynomial(Function):
 
     def __init__(
         self,
-        expression: Expression | int | float | complex | sp.Expr,
+        expression: Expression | NumericInput | sp.Expr,
         variable: Variable,
         *,
         domain: Set | None = None,

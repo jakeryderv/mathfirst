@@ -3,12 +3,24 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from fractions import Fraction
+from typing import cast, overload
 
+import numpy as np
 import sympy as sp
+from numpy.typing import DTypeLike
 from sympy.parsing.sympy_parser import (
     parse_expr,
     rationalize,
     standard_transformations,
+)
+
+from .numerical import (
+    DEFAULT_COMPLEX_DTYPE,
+    DEFAULT_REAL_DTYPE,
+    NumericInput,
+    NumericScalar,
+    _numeric_dtype,
+    as_numeric_array,
 )
 
 
@@ -23,7 +35,7 @@ class Expression:
 
     def __init__(
         self,
-        value: Expression | int | float | complex | sp.Expr,
+        value: Expression | NumericInput | Fraction | sp.Expr,
     ) -> None:
         self._expr = _to_sympy(value)
 
@@ -65,8 +77,8 @@ class Expression:
         return _wrap_sympy(-self._expr)
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, bool) or not isinstance(
-            other, (Expression, int, Fraction, float, complex, sp.Expr)
+        if isinstance(other, (bool, np.bool_)) or not isinstance(
+            other, (Expression, int, Fraction, float, complex, np.number, sp.Expr)
         ):
             return NotImplemented
 
@@ -80,31 +92,38 @@ class Expression:
 
 
 class ApproximateScalarWarning(UserWarning):
-    """A Python float was passed to Scalar without explicit approximate intent."""
+    """A floating-point input was passed without explicit approximate intent."""
 
 
 class Scalar(Expression):
     """A scalar whose numeric representation distinguishes exact and approximate.
 
     Integers and Fractions remain exact. Decimal strings are parsed as exact
-    rationals. Python floats remain approximate and warn unless passed through
-    approx(). Existing SymPy expressions retain their representation.
+    rationals. Python/NumPy floating and complex inputs remain approximate and
+    warn unless passed through approx(). Existing SymPy expressions retain
+    their representation. to_numpy() is the concrete numerical boundary.
     """
 
     def __init__(
         self,
-        value: Expression | int | Fraction | str | float | complex | sp.Expr,
+        value: Expression | NumericInput | Fraction | str | sp.Expr,
     ) -> None:
         super().__init__(_to_scalar_sympy(value))
 
         if self._expr.free_symbols:
             raise ValueError("Scalar cannot contain free variables")
 
-        if isinstance(value, float):
-            warnings.warn(
+        if isinstance(value, (float, complex, np.floating, np.complexfloating)):
+            message = (
                 "Python floats are approximate. "
                 f'Use Scalar.exact("{value}") for exact decimal intent or '
-                f"Scalar.approx({value!r}) to explicitly accept approximation.",
+                if isinstance(value, float) and not isinstance(value, np.floating)
+                else "Floating-point inputs are approximate. "
+                "Use Scalar.exact with an exact expression or decimal string, or "
+            )
+            warnings.warn(
+                message
+                + f"Scalar.approx({value!r}) to explicitly accept approximation.",
                 ApproximateScalarWarning,
                 stacklevel=2,
             )
@@ -112,16 +131,16 @@ class Scalar(Expression):
     @classmethod
     def exact(
         cls,
-        value: Expression | int | Fraction | str | float | complex | sp.Expr,
+        value: Expression | NumericInput | Fraction | str | sp.Expr,
     ) -> Scalar:
         """Construct an exact scalar without guessing intent from approximate input.
 
-        Python floats/complex values and expressions containing SymPy Floats
+        Python/NumPy floating or complex values and expressions containing Floats
         are rejected. Use decimal strings or Fractions for exact rational intent.
         """
-        if isinstance(value, (float, complex)):
+        if isinstance(value, (float, complex, np.floating, np.complexfloating)):
             raise TypeError(
-                "Exact scalars cannot infer intent from Python floats or complex "
+                "Exact scalars cannot infer intent from floating or complex "
                 "values; use a string, integer, Fraction, or exact expression"
             )
 
@@ -135,7 +154,7 @@ class Scalar(Expression):
     @classmethod
     def approx(
         cls,
-        value: Expression | int | Fraction | str | float | complex | sp.Expr,
+        value: Expression | NumericInput | Fraction | str | sp.Expr,
     ) -> Scalar:
         """Explicitly approximate a numeric scalar using SymPy's default precision.
 
@@ -154,6 +173,81 @@ class Scalar(Expression):
             result = sp.Float(result)
 
         return cls(result)
+
+    @overload
+    def to_numpy(
+        self, *, dtype: None = None, allow_nonfinite: bool = False
+    ) -> np.float64 | np.complex128: ...
+
+    @overload
+    def to_numpy[NumericT: NumericScalar](
+        self,
+        *,
+        dtype: type[NumericT] | np.dtype[NumericT],
+        allow_nonfinite: bool = False,
+    ) -> NumericT: ...
+
+    @overload
+    def to_numpy(
+        self, *, dtype: DTypeLike, allow_nonfinite: bool = False
+    ) -> NumericScalar: ...
+
+    def to_numpy(
+        self, *, dtype: DTypeLike | None = None, allow_nonfinite: bool = False
+    ) -> NumericScalar:
+        """Evaluate into a NumPy scalar without changing the mathematical source.
+
+        MathFirst defaults to float64 for real values and complex128 otherwise.
+        Explicit dtypes support fixed-width integers, float16/32/64, and
+        complex64/128. Integer output requires a proven integer and checks its
+        range. Real output cannot discard an imaginary component. Floating
+        output uses binary64 evaluation followed by the requested dtype's
+        rounding; underflow is permitted and overflow raises OverflowError.
+
+        NaN and signed infinity require allow_nonfinite=True. Complex infinity
+        and unevaluable expressions are rejected. Returned NumPy scalars are
+        immutable; conversion creates no mutable view or cache of this object.
+        """
+        if not isinstance(allow_nonfinite, bool):
+            raise TypeError("allow_nonfinite must be a Python boolean")
+        if not self._expr.is_number or self._expr.has(sp.zoo):
+            raise ValueError("Conversion requires an evaluable numerical scalar")
+        if dtype is None:
+            dtype = (
+                DEFAULT_REAL_DTYPE
+                if self._expr.is_real is True or self._expr in (sp.nan, sp.oo, -sp.oo)
+                else DEFAULT_COMPLEX_DTYPE
+            )
+        target = _numeric_dtype(dtype)
+        if target.kind in "iu":
+            if self._expr.is_integer is not True:
+                raise ValueError("Integer output requires a proven integer value")
+            value = int(self._expr)
+            limits = np.iinfo(target.str)
+            if value < limits.min or value > limits.max:
+                raise OverflowError(f"Value is outside the range of {target}")
+            return target.type(value)
+        try:
+            # SymPy's __complex__ first evalf()s at default decimal precision.
+            # Convert components directly to avoid that extra rounding step.
+            real, imaginary = self._expr.as_real_imag()
+            numeric = complex(float(real), float(imaginary))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Scalar cannot be evaluated numerically") from exc
+        if self._expr.is_finite is True and not np.isfinite(numeric):
+            raise OverflowError("Finite scalar overflows binary64 evaluation")
+        if target.kind == "f":
+            if numeric.imag != 0 and self._expr is not sp.nan:
+                raise ValueError("Real output cannot discard imaginary components")
+            converted = as_numeric_array(
+                numeric.real, dtype=target, allow_nonfinite=allow_nonfinite
+            )
+        else:
+            converted = as_numeric_array(
+                numeric, dtype=target, allow_nonfinite=allow_nonfinite
+            )
+        # A scalar input guarantees a zero-dimensional array and scalar indexing.
+        return cast(NumericScalar, converted[()])
 
     @property
     def is_exact(self) -> bool:
@@ -313,6 +407,8 @@ class Root:
 
 
 def _to_sympy(value: object) -> sp.Expr:
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError("Boolean values cannot represent a scalar expression")
     if isinstance(value, Expression):
         return value.to_sympy()
 

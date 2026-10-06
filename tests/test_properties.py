@@ -3,6 +3,7 @@
 from collections import Counter
 from fractions import Fraction
 
+import numpy as np
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -13,6 +14,17 @@ RATIONALS = st.builds(
     st.integers(min_value=-1000, max_value=1000),
     st.integers(min_value=1, max_value=1000),
 )
+
+
+@given(value=RATIONALS)
+@example(value=Fraction(71, 179))
+def test_scalar_numpy_conversion_matches_fraction(value: Fraction) -> None:
+    scalar = Scalar.exact(value)
+    source = scalar.to_sympy()
+    result = scalar.to_numpy(dtype=np.float64)
+    assert isinstance(result, np.float64)
+    assert result == float(value)
+    assert scalar.is_exact and scalar.to_sympy() is source
 
 
 def _as_fraction(expression: Expression) -> Fraction:

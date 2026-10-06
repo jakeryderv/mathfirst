@@ -22,7 +22,7 @@ Root
 
 These objects should preserve the structure and semantics of the mathematics they represent, including concepts such as exactness, assumptions, domains, codomains, dimensions, and algebraic relationships.
 
-SymPy is the current symbolic backend, and NumPy supports numerical sampling in the optional browser viewer. SciPy or mpmath may support future computational needs, while the public mathematical model remains defined by `mathfirst`.
+SymPy is the current symbolic backend, and NumPy supplies explicit numerical conversion and sampling in the optional browser viewer. SciPy or mpmath may support future computational needs, while the public mathematical model remains defined by `mathfirst`.
 
 The guiding principles are:
 
@@ -37,8 +37,9 @@ The guiding principles are:
 ## Current behavior and usage
 
 - `Variable("x")` represents a real variable by default; equal names represent the same variable.
-- `Scalar` preserves exact integers, fractions, and decimal strings. `Scalar.exact(...)` rejects approximate inputs; `Scalar.approx(...)` explicitly requests approximation. Passing a Python float directly to `Scalar` emits an `ApproximateScalarWarning` with both alternatives.
+- `Scalar` preserves exact integers, fractions, and decimal strings. `Scalar.exact(...)` rejects approximate inputs; `Scalar.approx(...)` explicitly requests approximation. Passing Python/NumPy floating or complex values directly to `Scalar` emits an `ApproximateScalarWarning` with both alternatives.
 - `Scalar.is_exact` describes the current representation, rather than the provenance of previous arithmetic.
+- `Scalar.to_numpy()` explicitly converts to MathFirst's numerical defaults (`float64` for real values, `complex128` otherwise), or a requested dtype, preserving the mathematical source. See [numerical contracts](docs/numerical.md) for validation, precision, and array ownership policies.
 - Function domains and codomains are optional, descriptive metadata. Construction validates expression and argument structure, and evaluation checks argument count. Set membership is available explicitly through `Set.contains()`; Cartesian products use `Set.product()`.
 - General derivatives leave domain and codomain unspecified unless supplied. Polynomial derivatives remain polynomials with real default sets.
 - Expression equality is structural. `real_roots()` returns exact real roots with multiplicities; `limit()` defaults to a two-sided approach and accepts an explicit direction.
@@ -58,10 +59,11 @@ p = Polynomial(x**2 - exact_decimal, x)
 print(p(Scalar(2)))  # 39/10
 print(derivative(p))  # 2*x
 backend_polynomial = p.to_sympy()
+numerical_decimal = exact_decimal.to_numpy()  # np.float64; exact_decimal stays exact
 ```
 
 Install with `uv add mathfirst` or `pip install mathfirst`. Requires Python
-3.12–3.14. SymPy is the current required backend.
+3.12–3.14. SymPy and NumPy are the required backends.
 
 Package tests live in [`tests/`](tests/). See the
 [development guide](docs/development.md) for setup, checks, and releases.

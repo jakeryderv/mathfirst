@@ -16,6 +16,7 @@ from .core import (
     _wrap_sympy,
 )
 from .function import Function
+from .numerical import NumericInput
 from .polynomial import Polynomial
 
 
@@ -54,7 +55,7 @@ def derivative(
 
 def limit(
     function: Function,
-    point: Scalar | int | float,
+    point: Scalar | NumericInput,
     variable: Variable | None = None,
     *,
     direction: Literal["-", "+", "+-"] = "+-",

@@ -7,12 +7,11 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.15"
 authors = [{ name = "Jake Van Slyke", email = "jakervanslyke@gmail.com" }]
-dependencies = ["sympy>=1.14.0"]
+dependencies = ["numpy>=2.0.0", "sympy>=1.14.0"]
 
 [project.optional-dependencies]
 viz = [
   "fastapi>=0.115.0",
-  "numpy>=2.0.0",
   "pydantic>=2.9.0",
   "uvicorn>=0.35.0",
   "websockets>=14.0",

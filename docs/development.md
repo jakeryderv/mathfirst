@@ -11,9 +11,9 @@ uv run --extra viz pytest
 uv build --no-sources
 ```
 
-Core runtime dependencies belong in `[project.dependencies]`; optional viewer
-backends belong in `[project.optional-dependencies].viz`, and development tools
-belong in the `dev` dependency group. Development commands enable the `viz` extra
+Core runtime dependencies (NumPy and SymPy) belong in `[project.dependencies]`;
+optional viewer backends belong in `[project.optional-dependencies].viz`, and
+development tools belong in the `dev` dependency group. Development commands enable the `viz` extra
 so the full suite includes viewer unit and server tests. Commit `uv.lock` after
 changing dependencies.
 Use `uv run --extra viz ruff format .` to apply formatting.
@@ -45,10 +45,12 @@ are ignored by Git.
 
 Hypothesis tests in `tests/test_properties.py` check exact scalar arithmetic
 against Python's `Fraction`, polynomial evaluation against Horner's method,
-and real roots against known factors and multiplicities. Generated viewer tests
-also compare sampled quadratics with Python arithmetic. Inputs are bounded
-integers and rationals; symbolic tests use 50 generated examples each and disable
-per-example time deadlines to avoid failures caused by machine speed.
+real roots against known factors and multiplicities, and scalar NumPy conversion
+against Python's `Fraction` conversion. Numerical canonicalization tests also cover
+finite float64 inputs, and generated viewer tests compare sampled quadratics with
+Python arithmetic. Symbolic inputs are bounded integers and rationals; the more
+expensive symbolic tests use 50 examples and disable per-example time deadlines
+to avoid failures caused by machine speed.
 
 Hypothesis runs through pytest and stores useful examples locally in the ignored
 `.hypothesis/` directory. If it finds a failure, preserve a focused regression test
