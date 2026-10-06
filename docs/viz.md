@@ -54,9 +54,11 @@ uv run --locked --extra viz python examples/invalid_values.py
 
 Open the notebook in your notebook editor and select a local Python kernel with
 the visualization extra installed. In this checkout, that is the `.venv`
-environment created by `uv sync --locked --extra viz`; the kernel also needs
-`ipykernel`, which your editor can install if requested. Run cells in order, keep
-the kernel alive while viewing, and run the final shutdown cell when finished.
+environment created by `uv sync --locked --extra viz`. The default dev group
+includes Jupyter and `ipykernel`, so no separate installation is needed for this
+checkout. In VS Code, select that environment as the notebook kernel; interpreter
+and notebook kernel selections are separate. Run cells in order, keep the kernel
+alive while viewing, and run the final shutdown cell when finished.
 Before rerunning the cells that construct a new viewer, close the existing one.
 
 ## Notebooks and background use

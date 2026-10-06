@@ -4,18 +4,19 @@ Run from the repository root:
 
 ```sh
 uv sync --locked --extra viz
-uv run --extra viz ruff format --check .
-uv run --extra viz ruff check .
-uv run --extra viz ty check
-uv run --extra viz pytest
+uv run --locked --extra viz ruff format --check .
+uv run --locked --extra viz ruff check .
+uv run --locked --extra viz ty check
+uv run --locked --extra viz pytest
 uv build --no-sources
 ```
 
 Core runtime dependencies (NumPy and SymPy) belong in `[project.dependencies]`;
 optional viewer backends belong in `[project.optional-dependencies].viz`, and
-development tools belong in the `dev` dependency group. Development commands enable the `viz` extra
-so the full suite includes viewer unit and server tests. Commit `uv.lock` after
-changing dependencies.
+development tools belong in the `dev` dependency group. Development commands
+enable the `viz` extra so the full suite includes viewer unit and server tests.
+Jupyter and `ipykernel` are installed with the default dev group for local notebook
+work. Commit `uv.lock` after changing dependencies.
 Use `uv run --extra viz ruff format .` to apply formatting.
 
 Implementation modules live directly in `src/mathfirst/`. The package root
@@ -52,8 +53,8 @@ Python arithmetic. Numerical function tests check polynomial values, broadcastin
 empty and constant results, dtype/validity contracts, and independent array
 ownership. Server tests verify NumPy data crosses the JSON boundary as numbers
 and `null`, with viewport recovery after errors. Symbolic inputs are bounded integers
-and rationals; the more expensive symbolic tests use 50 examples and disable per-example time deadlines
-to avoid failures caused by machine speed.
+and rationals; the more expensive symbolic tests use 50 examples and disable
+per-example time deadlines to avoid failures caused by machine speed.
 
 Hypothesis runs through pytest and stores useful examples locally in the ignored
 `.hypothesis/` directory. If it finds a failure, preserve a focused regression test
@@ -62,6 +63,42 @@ alongside the generated test. To inspect example statistics:
 ```sh
 uv run --extra viz pytest tests/test_properties.py --hypothesis-show-statistics
 ```
+
+## Examples and installed-package checks
+
+Run the core numerical example without the visualization extra:
+
+```sh
+uv run --locked python examples/numerical_evaluation.py
+```
+
+The [viewer guide](viz.md) covers the browser scripts and local notebook. Viewer
+scripts intentionally call blocking `show()` under their main guard. Importing
+them defines the math, realization, and viewer without starting a server.
+
+Build into an empty output directory, then check both installed distributions
+without importing from the source checkout:
+
+```sh
+uv build --no-sources --out-dir /tmp/mathfirst-dist
+uv run --isolated --no-project --with /tmp/mathfirst-dist/*.whl python -I tests/smoke.py
+uv run --isolated --no-project --with /tmp/mathfirst-dist/*.tar.gz python -I tests/smoke.py
+```
+
+Core smoke checks cover exact algebra, numerical conversion/evaluation, and
+sampling without importing optional web dependencies. Check each artifact's
+visualization extra and bundled assets as well:
+
+```sh
+for artifact in /tmp/mathfirst-dist/*.whl /tmp/mathfirst-dist/*.tar.gz; do
+  uv run --isolated --no-project --with "mathfirst[viz] @ file://$artifact" python -I tests/smoke_viz.py
+done
+```
+
+The visualization smoke starts a loopback server, fetches the packaged assets,
+exchanges a viewport request and samples over WebSocket, and closes the server.
+These checks exercise installation and runtime packaging; they do not test
+browser rendering or interactions. The publishing workflow runs the same checks.
 
 ## Git hooks
 

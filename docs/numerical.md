@@ -31,6 +31,11 @@ NumPy and SymPy are core dependencies. The optional `viz` extra supplies the web
 runtime. `Function.__call__()` continues to perform symbolic
 substitution and return mathematical objects, including for NumPy scalar arguments.
 
+The [runnable numerical example](../examples/numerical_evaluation.py) brings these
+APIs together. Run it from the repository root with
+`uv run --locked python examples/numerical_evaluation.py`; the visualization extra
+is not required.
+
 ## Scalar input and intent
 
 - Python and NumPy integers enter the mathematical model exactly, including values

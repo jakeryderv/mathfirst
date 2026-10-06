@@ -71,6 +71,15 @@ Install with `uv add mathfirst` or `pip install mathfirst`. Requires Python
 Package tests live in [`tests/`](tests/). See the
 [development guide](docs/development.md) for setup, checks, and releases.
 
+Run the [numerical example](examples/numerical_evaluation.py) from this checkout:
+
+```sh
+uv run --locked python examples/numerical_evaluation.py
+```
+
+It demonstrates exact substitution, explicit dtypes, numerical point copies,
+multivariable broadcasting, and real/complex evaluation without a browser.
+
 ## Browser visualization
 
 Install the optional viewer with `uv add "mathfirst[viz]"` or

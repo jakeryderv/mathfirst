@@ -1,4 +1,4 @@
-"""Run with: uv run --extra viz python examples/function_graph.py."""
+"""Run with: uv run --locked --extra viz python examples/function_graph.py."""
 
 from mathfirst import Polynomial, Variable
 from mathfirst.viz import FunctionGraph, Viewer

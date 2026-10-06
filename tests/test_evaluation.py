@@ -1,6 +1,7 @@
 """Explicit numerical boundaries preserve mathematics and array ownership."""
 
 from fractions import Fraction
+from math import e
 from typing import assert_type
 
 import numpy as np
@@ -8,6 +9,7 @@ import pytest
 import sympy as sp
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from sympy.utilities.lambdify import implemented_function
 
 from mathfirst import Expression, Function, Point, Polynomial, Scalar, Set, Variable
 from mathfirst.numerical import RealArray
@@ -45,6 +47,43 @@ def test_multivariable_broadcasting_and_constant_result_shape():
         Function(x, (x, y)).evaluate_numpy(left, right),
         np.broadcast_to(left, (3, 4)),
     )
+
+
+def test_transcendental_functions_support_multidimensional_arrays():
+    x = Variable("x")
+    function = Function(Expression(sp.exp(x.to_sympy())), (x,))
+    source = function.expression.to_sympy()
+    result = function.evaluate_numpy([[-1, 0], [1, 0]])
+    np.testing.assert_allclose(result, [[1 / e, 1], [e, 1]])
+    assert function.expression.to_sympy() == source
+
+
+def test_piecewise_function_respects_broadcast_shape_and_branch_values():
+    x, y = Variable("x"), Variable("y")
+    expression = Expression(
+        sp.Piecewise(
+            (x.to_sympy() + y.to_sympy(), x.to_sympy() > 0),
+            (y.to_sympy() - x.to_sympy(), True),
+        )
+    )
+    function = Function(expression, (x, y))
+    result = function.evaluate_numpy([[-2], [0], [3]], [[10, 20]])
+    np.testing.assert_array_equal(result, [[12, 22], [10, 20], [13, 23]])
+
+
+def test_attached_custom_implementation_is_not_executed():
+    x = Variable("x")
+    called = []
+
+    def custom(values):
+        called.append(values)
+        return values
+
+    external = implemented_function("external", custom)
+    function = Function(Expression(external(x.to_sympy())), (x,))
+    with pytest.raises(ValueError, match="NumPy backend"):
+        function.evaluate_numpy([1, 2])
+    assert not called
 
 
 @pytest.mark.parametrize("constant", [False, True])
